@@ -45,7 +45,7 @@ env.update(eval(compile(ast.Expression(policy_environment), '<installed-elevated
 available_globals = set(env) | set(standard_builtins)
 unsupported = {}
 for name, source in payload['addedCode'].items():
-    calls = set(n.func.id for n in ast.walk(ast.parse(source)) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name))
+    calls = set(n.func.id for n in ast.walk(ast.parse(source.encode('utf-8'))) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name))
     missing = sorted((calls & set(dir(__builtin__))) - available_globals)
     if missing: unsupported[name] = missing
 assert not unsupported, unsupported
