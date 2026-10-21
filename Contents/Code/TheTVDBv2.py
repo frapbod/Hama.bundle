@@ -215,6 +215,7 @@ def GetMetadata(media, movie, error_log, lang, metadata_source, AniDBid, TVDBid,
         SaveDict( Dict(json[lang]  , 'rating'    ), TheTVDB_dict, 'seasons', season, 'episodes', episode, 'content_rating'         )
         SaveDict( Dict(TheTVDB_dict, 'duration'  ), TheTVDB_dict, 'seasons', season, 'episodes', episode, 'duration'               )
         SaveDict( Dict(episode_json, 'firstAired'), TheTVDB_dict, 'seasons', season, 'episodes', episode, 'originally_available_at')
+        SaveDict( Dict(episode_json, 'id'), TheTVDB_dict, 'seasons', season, 'episodes', episode, 'tvdb_id')
         
         # Title from serie page
         rank, title = len(language_episodes)+1, ''
