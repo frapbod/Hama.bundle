@@ -42,9 +42,25 @@ python3 -W ignore::SyntaxWarning -m unittest discover -s tests -v
 ```
 
 The tests exercise provider dispatch, forced IDs, cache freshness/failure,
-parallel and exceptional refreshes, and artwork preservation. They do not
-replace a canary in Plex's Python 2 runtime. Production changes use Python 2.7
-syntax. The read-only provider check additionally calls the real resolver:
+parallel and exceptional refreshes, and artwork preservation. Compile every
+production file with the target server's installed RestrictedPython compiler
+and Plex Script Host before deploying. Ordinary Python 2 syntax checks do not
+catch Plex's prohibition on generators, including `contextmanager` helpers.
+The smoke check reads the bundle's existing code policy, rejects a `yield`
+negative control, and records compiler and source hashes without importing
+the plugin or writing to the server:
+
+```sh
+python3 scripts/check_plex_sandbox.py \
+  --libraries /path/to/Framework.bundle/Contents/Resources/Platforms/Shared/Libraries \
+  --output /path/to/compiler-report.json \
+  -- env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/path/to/Resources/Python/python27.zip \
+  '/path/to/Plex Script Host' -S
+```
+
+The runner command may be prefixed with `kubectl exec -i ... --` for a remote
+server. This compilation check does not replace a live canary. The read-only
+provider check additionally calls the real resolver:
 
 ```sh
 python3 scripts/verify_imdb_ids.py --plan /path/to/match-plan.json --output /path/to/results.json

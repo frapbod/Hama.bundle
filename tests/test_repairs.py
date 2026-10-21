@@ -27,8 +27,19 @@ def common_namespace():
           'contextmanager': contextmanager, 'Log': Mock(), 'CACHE_1DAY': 86400,
           'COMMON_HEADERS': {}, 'netLock': threading.Lock(), 'netLocked': {},
           'time': types.SimpleNamespace(time=lambda: 1, sleep=Mock()), 'basestring': str}
-    return load_functions('common.py', ['Dict', 'UpdateDict', 'ForceTVDBRefresh', 'LoadFile',
+    return load_functions('common.py', ['Dict', 'UpdateDict', 'LoadFile',
                                        'natural_sort_key', 'UpdateMeta', 'UpdateMetaField'], ns)
+
+
+@contextmanager
+def refresh_scope(ns, force):
+    """Set up a cache test; production Update scoping is tested separately below."""
+    previous = getattr(ns['tlocal'], 'force_tvdb_refresh', False)
+    ns['tlocal'].force_tvdb_refresh = bool(force) or previous
+    try:
+        yield
+    finally:
+        ns['tlocal'].force_tvdb_refresh = previous
 
 
 class CacheTests(unittest.TestCase):
@@ -50,33 +61,33 @@ class CacheTests(unittest.TestCase):
         self.request.assert_not_called()
 
     def test_forced_refresh_bypasses_disk_and_http_cache_and_saves_result(self):
-        with self.ns['ForceTVDBRefresh'](True):
+        with refresh_scope(self.ns, True):
             self.assertEqual(self.read(), {'title': 'Correct title'})
         self.assertEqual(self.request.call_args.kwargs['cacheTime'], 0)
         self.saved.assert_called_once()
 
     def test_v4_and_windows_cache_paths_are_also_bypassed(self):
-        with self.ns['ForceTVDBRefresh'](True):
+        with refresh_scope(self.ns, True):
             self.assertEqual(self.read('TheTVDBv4\\json\\384541'), {'title': 'Correct title'})
         self.assertEqual(self.request.call_args.kwargs['cacheTime'], 0)
 
     def test_anidb_and_shared_mapping_caches_are_not_bypassed(self):
-        with self.ns['ForceTVDBRefresh'](True):
+        with refresh_scope(self.ns, True):
             for directory in ['AniDB/xml', 'AniDB', 'AnimeLists', '', 'TheMovieDb/identity']:
                 self.assertIs(self.read(directory), self.stale)
         self.request.assert_not_called()
 
     def test_failed_forced_fetch_keeps_old_data_and_does_not_save(self):
         self.request.side_effect = IOError('provider unavailable')
-        with self.ns['ForceTVDBRefresh'](True):
+        with refresh_scope(self.ns, True):
             self.assertIs(self.read(), self.stale)
         self.saved.assert_not_called()
         self.assertFalse(self.ns['netLocked']['LoadFile'][0])
 
     def test_context_cleans_up_after_exception_and_nested_context(self):
         with self.assertRaises(RuntimeError):
-            with self.ns['ForceTVDBRefresh'](True):
-                with self.ns['ForceTVDBRefresh'](False):
+            with refresh_scope(self.ns, True):
+                with refresh_scope(self.ns, False):
                     self.assertTrue(self.ns['tlocal'].force_tvdb_refresh)
                 raise RuntimeError('update failed')
         self.assertFalse(self.ns['tlocal'].force_tvdb_refresh)
@@ -84,7 +95,7 @@ class CacheTests(unittest.TestCase):
 
     def test_parallel_normal_update_is_not_forced(self):
         observations = []
-        with self.ns['ForceTVDBRefresh'](True):
+        with refresh_scope(self.ns, True):
             thread = threading.Thread(target=lambda: observations.append(self.read()))
             thread.start()
             thread.join()
@@ -137,7 +148,7 @@ class AgentRoutingTests(unittest.TestCase):
     def setUp(self):
         self.ns = common_namespace()
         self.log = self.ns['Log']
-        self.common = types.SimpleNamespace(Log=self.log, ForceTVDBRefresh=self.ns['ForceTVDBRefresh'])
+        self.common = types.SimpleNamespace(Log=self.log, tlocal=self.ns['tlocal'])
         self.resolver = Mock(return_value='456')
         self.anidb_search = Mock(return_value=(0, 0))
         self.tvdb_search = Mock(return_value=100)
@@ -202,6 +213,20 @@ class AgentRoutingTests(unittest.TestCase):
             self.ns['Update'](object(), self.media, 'en', True, False)
         self.assertFalse(self.ns['tlocal'].force_tvdb_refresh)
         self.log.Close.assert_called_once()
+
+    def test_nested_nonforced_update_retains_outer_force_and_restores_it(self):
+        observed = []
+        def nested(*args):
+            observed.append(self.ns['tlocal'].force_tvdb_refresh)
+        def outer(*args):
+            observed.append(self.ns['tlocal'].force_tvdb_refresh)
+            self.ns['UpdateMetadata'] = nested
+            self.ns['Update'](object(), self.media, 'en', False, False)
+            observed.append(self.ns['tlocal'].force_tvdb_refresh)
+        self.ns['UpdateMetadata'] = outer
+        self.ns['Update'](object(), self.media, 'en', True, False)
+        self.assertEqual(observed, [True, True, True])
+        self.assertFalse(self.ns['tlocal'].force_tvdb_refresh)
 
 
 class ArtworkTests(unittest.TestCase):

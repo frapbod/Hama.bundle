@@ -130,9 +130,13 @@ def Search(results, media, lang, manual, movie):
         
 ### Update Movie/Serie from metadata.id assigned #########################################################################################################################
 def Update(metadata, media, lang, force, movie):
-  with common.ForceTVDBRefresh(force):
-    try:     return UpdateMetadata(metadata, media, lang, force, movie)
-    finally: common.Log.Close()
+  # Plex's RestrictedPython compiler disallows yield/contextmanager functions.
+  previous = getattr(common.tlocal, 'force_tvdb_refresh', False)
+  common.tlocal.force_tvdb_refresh = bool(force) or previous
+  try:  return UpdateMetadata(metadata, media, lang, force, movie)
+  finally:
+    common.tlocal.force_tvdb_refresh = previous
+    common.Log.Close()
 
 def UpdateMetadata(metadata, media, lang, force, movie):
   from common import Log  #Import here for startup logging to go to the plex pms log

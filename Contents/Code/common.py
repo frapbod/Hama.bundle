@@ -14,7 +14,6 @@ import unicodedata            #
 import StringIO, gzip         #
 from string import maketrans  # maketrans
 import threading              #local,
-from contextlib import contextmanager
 tlocal = threading.local()
 #Log.Info('tlocal: {}'.format(dir(tlocal)))
 
@@ -375,14 +374,6 @@ def throttle_add(index=""):
   if index:
     if index not in THROTTLE: THROTTLE[index] = []
     THROTTLE[index].append(time.time())
-
-@contextmanager
-def ForceTVDBRefresh(force):
-  '''Bypass TVDB metadata caches for this update only; keep AniDB rate/cache policy.'''
-  previous = getattr(tlocal, 'force_tvdb_refresh', False)
-  tlocal.force_tvdb_refresh = bool(force) or previous
-  try:     yield
-  finally: tlocal.force_tvdb_refresh = previous
 
 def LoadFile(filename="", relativeDirectory="", url="", headers={}, data=None, cache=CACHE_1DAY*6, sleep=0, throttle=["", 0, 0]):
   ''' Load file in Plex Media Server/Plug-in Support/Data/com.plexapp.agents.hama/DataItems if cache time not passed
