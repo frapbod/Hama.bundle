@@ -239,6 +239,7 @@ def GetMetadata(media, movie, error_log, lang, metadata_source, AniDBid, TVDBid,
         SaveDict( rating,                        TheTVDB_dict, 'seasons', season, 'episodes', episode, 'content_rating'         )
         SaveDict( Dict(episode_json, 'runtime'), TheTVDB_dict, 'seasons', season, 'episodes', episode, 'duration'               )
         SaveDict( Dict(episode_json, 'aired'),   TheTVDB_dict, 'seasons', season, 'episodes', episode, 'originally_available_at')
+        SaveDict( Dict(episode_json, 'linkedEpisode') or Dict(episode_json, 'id'), TheTVDB_dict, 'seasons', season, 'episodes', episode, 'tvdb_id')
                 
         ### Ep advance information ###
         for lang_rank, language in enumerate(language_episodes):

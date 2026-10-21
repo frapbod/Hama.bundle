@@ -178,9 +178,11 @@ def UpdateMetadata(metadata, media, lang, force, movie):
   Log.Info('=== Update() ==='.ljust(157, '='))
   Log.Info("AniDBid: '{}', TVDBid: '{}', TMDbid: '{}', IMDbid: '{}', ANNid:'{}', MALid: '{}'".format(AniDBid, TVDBid, TMDbid, IMDbid, ANNid, MainMALid))
   common.write_logs(media, movie, error_log, source, AniDBid, TVDBid)
-  common.UpdateMeta(metadata, media, movie, {'AnimeLists': dict_AnimeLists, 'AniDB':       dict_AniDB,       'TheTVDB': dict_TheTVDB, 'TheMovieDb': dict_TheMovieDb, 
+  providers = {'AnimeLists': dict_AnimeLists, 'AniDB':       dict_AniDB,       'TheTVDB': dict_TheTVDB, 'TheMovieDb': dict_TheMovieDb,
                                              'FanartTV':   dict_FanartTV,   'tvdb4':       dict_tvdb4,       'Plex':    dict_Plex,    'TVTunes':    dict_TVTunes, 
-                                             'OMDb':       dict_OMDb,       'Local':       dict_Local,       'AniList': dict_AniList, 'MyAnimeList': dict_MyAnimeList}, mappingList)
+                                             'OMDb':       dict_OMDb,       'Local':       dict_Local,       'AniList': dict_AniList, 'MyAnimeList': dict_MyAnimeList}
+  if not movie:  TheMovieDb.FillEpisodeSummaries(media, lang, TVDBid, providers)
+  common.UpdateMeta(metadata, media, movie, providers, mappingList)
   Log.Info("end: {}".format(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")))
   Log.Close()
 

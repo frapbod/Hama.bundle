@@ -20,6 +20,8 @@ TMDB_CONFIG_URL             = 'https://api.tmdb.org/3/configuration?api_key=%s' 
 TMDB_MOVIE_IMAGES_URL       = 'https://api.tmdb.org/3/{mode}/{id}/images?api_key=%s' % TMDB_API_KEY
 TMDB_FIND_IMDB_URL          = 'https://api.tmdb.org/3/find/{id}?api_key=%s&external_source=imdb_id' % TMDB_API_KEY
 TMDB_TV_EXTERNAL_IDS_URL    = 'https://api.tmdb.org/3/tv/{id}/external_ids?api_key=%s' % TMDB_API_KEY
+TMDB_FIND_TVDB_EPISODE_URL  = 'https://api.tmdb.org/3/find/{id}?api_key=%s&external_source=tvdb_id&language={lang}' % TMDB_API_KEY
+TMDB_EPISODE_EXTERNAL_URL  = 'https://api.tmdb.org/3/tv/{show}/season/{season}/episode/{episode}/external_ids?api_key=%s' % TMDB_API_KEY
 
 def ResolveTVDBID(imdb_id):
   '''Resolve a forced TV IMDb ID without fuzzy title matching or movie fallback.'''
@@ -34,6 +36,43 @@ def ResolveTVDBID(imdb_id):
   tvdb_id = str(Dict(external, 'tvdb_id'))
   if str(Dict(external, 'id')) != tmdb_id or Dict(external, 'imdb_id') != imdb_id or not tvdb_id.isdigit() or int(tvdb_id) <= 0:  return ''
   return tvdb_id
+
+def GetEpisodeSummary(TVDBid, episode_id, lang):
+  '''Find an exact TVDB episode and verify both its episode and series identity.'''
+  TVDBid, episode_id = str(TVDBid), str(episode_id)
+  if not TVDBid.isdigit() or int(TVDBid) <= 0 or not episode_id.isdigit() or int(episode_id) <= 0:  return ''
+  lang = lang if re.match(r'^[a-z]{2,3}(?:-[A-Z]{2})?$', lang or '') else 'en'
+  result = common.LoadFile(filename='TVDB-' + episode_id + '-' + lang + '.json', relativeDirectory=os.path.join('TheMovieDb', 'episodes'), url=TMDB_FIND_TVDB_EPISODE_URL.format(id=episode_id, lang=lang))
+  candidates = Dict(result, 'tv_episode_results', default=[])
+  if not isinstance(candidates, list) or len(candidates) != 1:  return ''
+  candidate = candidates[0]
+  summary = Dict(candidate, 'overview')
+  if not isinstance(summary, basestring) or not summary.strip():  return ''
+  tmdb_id, show_id = str(Dict(candidate, 'id')), str(Dict(candidate, 'show_id'))
+  season, episode = str(Dict(candidate, 'season_number')), str(Dict(candidate, 'episode_number'))
+  if not all(value.isdigit() for value in (tmdb_id, show_id, season, episode)) or int(tmdb_id) <= 0 or int(show_id) <= 0:  return ''
+  series_external = common.LoadFile(filename='TV-external-' + show_id + '.json', relativeDirectory=os.path.join('TheMovieDb', 'identity'), url=TMDB_TV_EXTERNAL_IDS_URL.format(id=show_id))
+  if str(Dict(series_external, 'id')) != show_id or str(Dict(series_external, 'tvdb_id')) != TVDBid:  return ''
+  external = common.LoadFile(filename='TV-episode-external-' + tmdb_id + '.json', relativeDirectory=os.path.join('TheMovieDb', 'identity'), url=TMDB_EPISODE_EXTERNAL_URL.format(show=show_id, season=season, episode=episode))
+  if str(Dict(external, 'id')) != tmdb_id or str(Dict(external, 'tvdb_id')) != episode_id:  return ''
+  return summary.strip()
+
+def FillEpisodeSummaries(media, lang, TVDBid, providers):
+  '''Fill only gaps left by sources ahead of TheMovieDb in episode preferences.'''
+  preference = Prefs['summary'].split('|')[-1]
+  sources = [source.strip() for source in preference.split(',')]
+  if 'TheMovieDb' not in sources:  return
+  earlier_sources = sources[:sources.index('TheMovieDb')]
+  for season in media.seasons:
+    for episode in media.seasons[season].episodes:
+      path = ('seasons', season, 'episodes', episode, 'summary')
+      if any(Dict(providers, source, *path) for source in earlier_sources + ['TheMovieDb']):  continue
+      episode_id = Dict(providers, 'TheTVDB', 'seasons', season, 'episodes', episode, 'tvdb_id')
+      if not episode_id:  continue
+      summary = GetEpisodeSummary(TVDBid, episode_id, lang)
+      if summary:
+        SaveDict(summary, providers['TheMovieDb'], *path)
+        Log.Info('TMDb summary fallback: TVDB series {}, episode {}, mapped s{}e{}'.format(TVDBid, episode_id, season, episode))
 
 ### ###
 def GetMetadata(media, movie, TVDBid, TMDbid, IMDbid):

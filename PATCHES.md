@@ -14,6 +14,7 @@ commit `b6bfa300332369062b48d17e2277207d1da0a6cd`.
   The default v4 key shipped upstream is `TODO` and cannot authenticate.
 - Honor a forced refresh for TVDB series/episode metadata. Bypass both the
   agent's local `TheTVDB/json` or `TheTVDBv4/json` cache and the Plex HTTP cache.
+  The same bypass applies to the new `TheMovieDb/episodes` summary fallback.
   The override is thread-local, nested-safe, and restored after exceptions.
   A failed download retains existing cached metadata and logs the failure.
 - Keep AniDB's adaptive cache, six-second delay, and 100-request/hour throttle.
@@ -29,9 +30,22 @@ commit `b6bfa300332369062b48d17e2277207d1da0a6cd`.
   partial image-download failures cannot clear the old show/season artwork.
   Existing artwork keeps its previous ordering; future preference changes
   will not re-rank an already stored URL automatically.
+- Skip AniDB and AniList ID lookups for absent or invalid AniDB identifiers.
+  Valid mapped installments and the AniList MAL-ID fallback still run. Keep
+  voice-actor names and roles when AniDB has no actor photo.
+- Fill episode-summary gaps through TMDb only when earlier configured
+  providers have no summary. Carry the exact TVDB episode ID through Hama's
+  numbering map, find it through TMDb's external-ID endpoint, and cross-check
+  both the episode and parent show's external IDs. Do not guess by season
+  number or title. Ambiguous IDs or failed checks leave the gap unchanged.
 
-No user preference file is included or replaced. Do not change existing
-`com.plexapp.agents.hama.xml` preferences when deploying this build.
+No user preference file is included or replaced. To enable the episode
+fallback on an existing installation, preserve the current summary source
+order and append `TheMovieDb` only to the episode half after `|`. For example,
+`TheTVDB, AniDB` becomes `TheTVDB, AniDB | TheTVDB, AniDB, TheMovieDb`.
+All other values in `com.plexapp.agents.hama.xml` stay unchanged. The default
+for new installations follows that same split; show and season precedence
+remains unchanged.
 
 ## Validation and build
 
