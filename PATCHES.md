@@ -47,6 +47,14 @@ All other values in `com.plexapp.agents.hama.xml` stay unchanged. The default
 for new installations follows that same split; show and season precedence
 remains unchanged.
 
+In Plex's legacy agent settings, put **HamaTV** before **Local Media Assets
+(TV)** under **Shows > HamaTV**. Keep Local Media Assets enabled for local
+subtitles and artwork. If it comes first, embedded release titles or encoder
+comments can replace Hama's episode titles and summaries during Plex's final
+metadata combination, even after a successful Hama update. Refresh affected
+shows after changing the order and verify the published text. This Plex source
+priority is separate from Hama's per-field provider preferences above.
+
 ## Validation and build
 
 Run the production-function tests with boundary doubles:
