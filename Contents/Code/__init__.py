@@ -15,6 +15,7 @@ import common            # Functions: GetPlexLibraries, write_logs, UpdateMeta  
 from common import Dict
 import AnimeLists        # Functions: GetMetadata, GetAniDBTVDBMap, GetAniDBMovieSets            Variables: AniDBMovieSets
 import tvdb4             # Functions: GetMetadata                                                Variables: None
+import TheTVDBv2         # Working legacy metadata API and AniDB-backed search
 import TheTVDBv4         # Functions: GetMetadata, Search                                        Variables: None
 import AniDB             # Functions: GetMetadata, Search, GetAniDBTitlesDB                      Variables: None
 import TheMovieDb        # Functions: GetMetadata, Search                                        Variables: None
@@ -28,7 +29,9 @@ import Local             # Functions: GetMetadata                               
 import anidb34           # Functions: AdjustMapping                                              Variables: None
 
 ### Variables ###
-  
+# Upstream #611: v4 cannot authenticate with the placeholder key shipped on master.
+TheTVDB = TheTVDBv4 if TheTVDBv4.TVDB_API_KEY not in ('', 'TODO') else TheTVDBv2
+
 ### Pre-Defined ValidatePrefs function Values in "DefaultPrefs.json", accessible in Settings>Tab:Plex Media Server>Sidebar:Agents>Tab:Movies/TV Shows>Tab:HamaTV #######
 def ValidatePrefs():
   Log.Info("".ljust(157, '='))
@@ -102,27 +105,46 @@ def Search(results, media, lang, manual, movie):
   ### Check if a guid is specified "Show name [anidb-id]" ###
   Log.Info('--- force id ---'.ljust(157, '-'))
   if orig_title and orig_title.isdigit():  orig_title = "xxx [tvdb-{}]".format(orig_title)  #Support tvdbid as title, allow to support Xattr from FileBot with tvdbid filled in
-  match = re.search(r"(?P<show>.*?) ?[\[\{](?P<source>(anidb(|[2-9])|tvdb(|[2-9])|tmdb|tsdb|imdb))-(?P<guid>[^\[\]]*)[\]\}]", orig_title, re.IGNORECASE)
+  match = re.search(r"(?P<show>.*?) ?[\[\{](?P<source>(anidb(|[2-9])|tvdb(|[2-9])|tmdb|tsdb|imdb))-(?P<guid>[^\[\]\{\}]*)[\]\}]", orig_title, re.IGNORECASE)
   if match is not None:
-    guid=match.group('source') + '-' + match.group('guid')
-    if guid.startswith('anidb') and not movie and max(map(int, media.seasons.keys()))>1:  Log.Info('[!] multiple seasons = tvdb numbering, BAKA!')
-    results.Append(MetadataSearchResult(id=guid, name=match.group('show')+" ["+guid+']', year=media.year, lang=lang, score=100))
-    Log.Info("Forced ID - source: {}, id: {}, title: '{}'".format(match.group('source'), match.group('guid'), match.group('show')))
+    source, forced_id = match.group('source').lower(), match.group('guid').strip()
+    guid = source + '-' + forced_id
+    if source.startswith('tvdb') and (not forced_id.isdigit() or int(forced_id) <= 0):  guid = None
+    if source == 'imdb' and not movie:
+      TVDBid = TheMovieDb.ResolveTVDBID(forced_id)
+      guid = 'tvdb-' + TVDBid if TVDBid else None
+    if guid:
+      if guid.startswith('anidb') and not movie and max(map(int, media.seasons.keys()))>1:  Log.Info('[!] multiple seasons = tvdb numbering, BAKA!')
+      results.Append(MetadataSearchResult(id=guid, name=match.group('show')+" ["+guid+']', year=media.year, lang=lang, score=100))
+      Log.Info("Forced ID - source: {}, id: {}, resolved: {}, title: '{}'".format(source, forced_id, guid, match.group('show')))
+    else:  Log.Error("Forced ID could not be resolved safely: {}-{}; no title-search fallback".format(source, forced_id))
   else:  #if media.year is not None:  orig_title = orig_title + " (" + str(media.year) + ")"  ### Year - if present (manual search or from scanner but not mine), include in title ###
     Log.Info('--- source searches ---'.ljust(157, '-'))
     maxi, n = 0, 0
     if movie or max(map(int, media.seasons.keys()))<=1:  maxi, n =         AniDB.Search(results, media, lang, manual, movie)
     if maxi<50 and movie:                                maxi    =    TheMovieDb.Search(results, media, lang, manual, movie)
-    if maxi<80 and not movie or n>1:                     maxi    = max(TheTVDBv4.Search(results, media, lang, manual, movie), maxi)
+    if maxi<80 and not movie or n>1:                     maxi    = max(TheTVDB.Search(results, media, lang, manual, movie), maxi)
   Log.Info("".ljust(157, '='))
   Log.Info("end: {}".format(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")))
   Log.Close()
         
 ### Update Movie/Serie from metadata.id assigned #########################################################################################################################
 def Update(metadata, media, lang, force, movie):
+  with common.ForceTVDBRefresh(force):
+    try:     return UpdateMetadata(metadata, media, lang, force, movie)
+    finally: common.Log.Close()
+
+def UpdateMetadata(metadata, media, lang, force, movie):
   from common import Log  #Import here for startup logging to go to the plex pms log
   Log.Open(media=media, movie=movie, search=False)
-  source    = metadata.id.split('-', 1)[0]
+  metadata_id = metadata.id
+  if not movie and metadata_id.startswith('imdb-'):
+    TVDBid = TheMovieDb.ResolveTVDBID(metadata_id.split('-', 1)[1])
+    if not TVDBid:
+      Log.Error('Forced IMDb identity could not be resolved; preserving existing metadata')
+      return
+    metadata_id = 'tvdb-' + TVDBid
+  source    = metadata_id.split('-', 1)[0]
   error_log = { 'AniDB summaries missing'   :[], 'AniDB posters missing'      :[], 'anime-list AniDBid missing':[], 'anime-list studio logos'  :[],  
                 'TVDB posters missing'      :[], 'TVDB season posters missing':[], 'anime-list TVDBid missing' :[], 'Plex themes missing'      :[],
                 'Missing Episodes'          :[], 'Missing Specials'           :[], 'Missing Episode Summaries' :[], 'Missing Special Summaries':[]}
@@ -135,9 +157,9 @@ def Update(metadata, media, lang, force, movie):
   #   mappingList['season_map']:    AnimeLists->TheTVDBv4->AdjustMapping
   #   mappingList['relations_map']: AniDB->AdjustMapping
   #   mappingList['absolute_map']:  tvdb4->TheTVDBv4->AniDB
-  dict_AnimeLists, AniDBid, TVDBid, TMDbid, IMDbid, mappingList =  AnimeLists.GetMetadata(media, movie, error_log, metadata.id)
+  dict_AnimeLists, AniDBid, TVDBid, TMDbid, IMDbid, mappingList =  AnimeLists.GetMetadata(media, movie, error_log, metadata_id)
   dict_tvdb4                                                    =       tvdb4.GetMetadata(media, movie,                  source,          TVDBid,                 mappingList)
-  dict_TheTVDB,                             IMDbid              =   TheTVDBv4.GetMetadata(media, movie, error_log, lang, source, AniDBid, TVDBid, IMDbid,         mappingList)
+  dict_TheTVDB,                             IMDbid              =     TheTVDB.GetMetadata(media, movie, error_log, lang, source, AniDBid, TVDBid, IMDbid,         mappingList)
   dict_AniDB, ANNid, MALids                                     =       AniDB.GetMetadata(media, movie, error_log,       source, AniDBid, TVDBid, AnimeLists.AniDBMovieSets, mappingList)
   dict_TheMovieDb,          TSDbid, TMDbid, IMDbid              =  TheMovieDb.GetMetadata(media, movie,                                   TVDBid, TMDbid, IMDbid)
   dict_FanartTV                                                 =    FanartTV.GetMetadata(       movie,                                   TVDBid, TMDbid, IMDbid)

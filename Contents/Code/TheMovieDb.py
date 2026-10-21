@@ -4,6 +4,7 @@
 ### Imports ###
 # Python Modules #
 import os
+import re
 # HAMA Modules #
 import common
 from common import Log, DictString, Dict, SaveDict # Direct import of heavily used functions
@@ -17,6 +18,22 @@ TMDB_CONFIG_URL             = 'https://api.tmdb.org/3/configuration?api_key=%s' 
 #TMDB_MOVIE_GENRE_LIST       = "https://api.TheMovieDb.org/3/genre/movie/list?api_key=%s&language=en" % TMDB_API_KEY
 #TMDB_SERIE_GENRE_LIST       = "https://api.TheMovieDb.org/3/genre/tv/list?api_key=%s&language=en" % TMDB_API_KEY
 TMDB_MOVIE_IMAGES_URL       = 'https://api.tmdb.org/3/{mode}/{id}/images?api_key=%s' % TMDB_API_KEY
+TMDB_FIND_IMDB_URL          = 'https://api.tmdb.org/3/find/{id}?api_key=%s&external_source=imdb_id' % TMDB_API_KEY
+TMDB_TV_EXTERNAL_IDS_URL    = 'https://api.tmdb.org/3/tv/{id}/external_ids?api_key=%s' % TMDB_API_KEY
+
+def ResolveTVDBID(imdb_id):
+  '''Resolve a forced TV IMDb ID without fuzzy title matching or movie fallback.'''
+  imdb_id = imdb_id.lower()
+  if not re.match(r'^tt[0-9]{7,}$', imdb_id):  return ''
+  result = common.LoadFile(filename='IMDb-find-' + imdb_id + '.json', relativeDirectory=os.path.join('TheMovieDb', 'identity'), url=TMDB_FIND_IMDB_URL.format(id=imdb_id))
+  candidates = Dict(result, 'tv_results', default=[])
+  if not isinstance(candidates, list) or len(candidates) != 1:  return ''
+  tmdb_id = str(Dict(candidates[0], 'id'))
+  if not tmdb_id.isdigit() or int(tmdb_id) <= 0:  return ''
+  external = common.LoadFile(filename='TV-external-' + tmdb_id + '.json', relativeDirectory=os.path.join('TheMovieDb', 'identity'), url=TMDB_TV_EXTERNAL_IDS_URL.format(id=tmdb_id))
+  tvdb_id = str(Dict(external, 'tvdb_id'))
+  if str(Dict(external, 'id')) != tmdb_id or Dict(external, 'imdb_id') != imdb_id or not tvdb_id.isdigit() or int(tvdb_id) <= 0:  return ''
+  return tvdb_id
 
 ### ###
 def GetMetadata(media, movie, TVDBid, TMDbid, IMDbid):
