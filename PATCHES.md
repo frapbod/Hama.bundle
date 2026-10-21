@@ -72,9 +72,26 @@ python3 scripts/check_plex_sandbox.py \
   '/path/to/Plex Script Host' -S
 ```
 
-The runner command may be prefixed with `kubectl exec -i ... --` for a remote
-server. This compilation check does not replace a live canary. The read-only
-provider check additionally calls the real resolver:
+Also execute the fallback using the target's actual restricted builtins and
+Elevated-policy globals. Compiling alone cannot detect unavailable runtime
+names: Plex omits `any()` and `all()` even on its Python 2.7 host. The runtime
+check reads the installed environment definitions, executes the production
+module against in-memory provider fixtures, checks identity rejection and
+source precedence, and proves both unsupported calls fail. It writes no
+plugin state and makes no provider requests:
+
+```sh
+python3 scripts/check_plex_runtime.py \
+  --libraries /path/to/Framework.bundle/Contents/Resources/Platforms/Shared/Libraries \
+  --output /path/to/runtime-report.json \
+  -- env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/path/to/Resources/Python/python27.zip \
+  '/path/to/Plex Script Host' -S
+```
+
+Both runner commands may be prefixed with `kubectl exec -i ... --` for a remote
+server. These checks do not replace a live canary that reaches Hama's final
+`UpdateMeta` and `end` log entries; Plex can publish old metadata after an
+agent exception. The read-only provider check also calls the real resolver:
 
 ```sh
 python3 scripts/verify_imdb_ids.py --plan /path/to/match-plan.json --output /path/to/results.json

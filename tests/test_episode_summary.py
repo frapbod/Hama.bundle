@@ -1,4 +1,5 @@
 import copy
+import builtins
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
@@ -10,6 +11,8 @@ class EpisodeSummaryTests(unittest.TestCase):
     def setUp(self):
         self.common = common()
         self.ns = functions('TheMovieDb.py', ['GetEpisodeSummary', 'FillEpisodeSummaries'], {
+            # Plex's real sandbox omits these even though its host is Python 2.7.
+            '__builtins__': {key: value for key, value in vars(builtins).items() if key not in ('any', 'all')},
             'common': self.common, 'Dict': self.common.Dict, 'SaveDict': self.common.SaveDict,
             'Log': Mock(), 'os': __import__('os'), 're': __import__('re'), 'basestring': str,
             'TMDB_FIND_TVDB_EPISODE_URL': 'https://example.test/find/{id}?language={lang}',

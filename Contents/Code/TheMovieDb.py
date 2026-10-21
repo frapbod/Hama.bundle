@@ -50,7 +50,10 @@ def GetEpisodeSummary(TVDBid, episode_id, lang):
   if not isinstance(summary, basestring) or not summary.strip():  return ''
   tmdb_id, show_id = str(Dict(candidate, 'id')), str(Dict(candidate, 'show_id'))
   season, episode = str(Dict(candidate, 'season_number')), str(Dict(candidate, 'episode_number'))
-  if not all(value.isdigit() for value in (tmdb_id, show_id, season, episode)) or int(tmdb_id) <= 0 or int(show_id) <= 0:  return ''
+  # Plex's sandbox omits all()/any(), even on its Python 2.7 host.
+  for value in (tmdb_id, show_id, season, episode):
+    if not value.isdigit():  return ''
+  if int(tmdb_id) <= 0 or int(show_id) <= 0:  return ''
   series_external = common.LoadFile(filename='TV-external-' + show_id + '.json', relativeDirectory=os.path.join('TheMovieDb', 'identity'), url=TMDB_TV_EXTERNAL_IDS_URL.format(id=show_id))
   if str(Dict(series_external, 'id')) != show_id or str(Dict(series_external, 'tvdb_id')) != TVDBid:  return ''
   external = common.LoadFile(filename='TV-episode-external-' + tmdb_id + '.json', relativeDirectory=os.path.join('TheMovieDb', 'identity'), url=TMDB_EPISODE_EXTERNAL_URL.format(show=show_id, season=season, episode=episode))
@@ -66,7 +69,12 @@ def FillEpisodeSummaries(media, lang, TVDBid, providers):
   for season in media.seasons:
     for episode in media.seasons[season].episodes:
       path = ('seasons', season, 'episodes', episode, 'summary')
-      if any(Dict(providers, source, *path) for source in earlier_sources + ['TheMovieDb']):  continue
+      existing_summary = False
+      for source in earlier_sources + ['TheMovieDb']:
+        if Dict(providers, source, *path):
+          existing_summary = True
+          break
+      if existing_summary:  continue
       episode_id = Dict(providers, 'TheTVDB', 'seasons', season, 'episodes', episode, 'tvdb_id')
       if not episode_id:  continue
       summary = GetEpisodeSummary(TVDBid, episode_id, lang)
