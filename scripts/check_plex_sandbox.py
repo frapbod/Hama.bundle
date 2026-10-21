@@ -60,6 +60,7 @@ def main():
     payload = {'libraries': args.libraries, 'sources': sources, 'elevated': elevated}
     result = subprocess.run(runner + ['-c', RUNNER], input=json.dumps(payload), text=True, capture_output=True)
     reports = [line for line in result.stdout.splitlines() if line.startswith('{')]
+    valid_report = False
     if reports:
         report = json.loads(reports[-1])
         report['sourceSha256'] = {name: hashlib.sha256(source.encode()).hexdigest() for name, source in sources.items()}
@@ -71,11 +72,17 @@ def main():
         for row in report['files']:
             if not row['compiled']:
                 print(json.dumps(row))
+        filenames = [row['file'] for row in report['files']]
+        valid_report = (len(filenames) == len(sources) and set(filenames) == set(sources)
+                        and report['negativeControlRejectedYield']
+                        and all(row['compiled'] for row in report['files']))
+        if not valid_report:
+            print('Compiler report is incomplete or failed validation')
     if result.stderr:
         print(result.stderr)
     if not reports:
         print('Compiler runner did not return a report: ' + result.stdout[-2000:])
-    return result.returncode
+    return result.returncode or (0 if valid_report else 1)
 
 
 if __name__ == '__main__':
