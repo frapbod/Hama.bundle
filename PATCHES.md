@@ -26,6 +26,24 @@ commit `b6bfa300332369062b48d17e2277207d1da0a6cd`.
   and TMDb IDs before accepting a positive TVDB ID. Missing or ambiguous
   identities produce no match rather than a fuzzy title fallback. Existing
   explicit AniDB and TVDB numbering modes are preserved.
+- Restore untagged general-TV searches through TMDb's supported TV search API
+  when the existing anime/TVDB routes produce no score of 80 or higher. Tagged
+  IDs, movie searches, high-confidence anime matches and numbering keep their
+  existing paths. This does not change field-source preferences or update code.
+  Search compares normalized localized/original titles, preserves non-Latin
+  characters, and uses a supplied premiere year or trailing `(YYYY)` to separate
+  remakes. Conflicting years, fuzzy-only matches, failed identity checks and
+  incomplete (multi-page) result sets produce no new candidate. Add the premiere
+  year or an exact provider tag for such queries. No show-specific exceptions
+  are used.
+  A unique exact title/year candidate must pass the TMDb external-ID lookup and
+  a unique reverse TVDB-ID lookup with the same TMDb ID, title and premiere date.
+  Ambiguous automatic searches return no new candidate; manual choices remain
+  below automatic-match confidence (79), even if one candidate lacks an external
+  ID. A complete page is capped at 20 entries: at most 3 provider reads for an
+  automatic search and 41 for manual choices. Search results use a one-day cache;
+  identity reads reuse the existing cache. New uncached reads use the existing
+  serialized loader with 100 ms spacing; no retries or new credentials are added.
 - Add artwork without deleting existing URLs first. Provider failures and
   partial image-download failures cannot clear the old show/season artwork.
   Existing artwork keeps its previous ordering; future preference changes
@@ -104,6 +122,20 @@ agent exception. The read-only provider check also calls the real resolver:
 ```sh
 python3 scripts/verify_imdb_ids.py --plan /path/to/match-plan.json --output /path/to/results.json
 ```
+
+Read-only live title-search verification uses a JSON list of cases with `title`,
+optional `year`/`manual`/`lang`, and `expected` TVDB GUIDs (for example,
+`[{"title":"Breaking Bad","expected":["tvdb-81189"]}]`). Ground expectations in
+an independent provider or the already-verified library identity, not in the
+new search result itself. Ambiguous/missing cases use an empty expected list.
+
+```sh
+python3 scripts/verify_tv_search.py --cases /path/to/cases.json --output /path/to/results.json
+```
+
+This probe executes production functions against live TMDb, with no Plex writes.
+It is not a deployed-agent canary. The RestrictedPython runner also executes the
+shared title-search cases and real agent dispatch for tagged IDs/anime priority.
 
 Build from a clean committed checkout:
 

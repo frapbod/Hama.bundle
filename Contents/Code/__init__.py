@@ -124,6 +124,7 @@ def Search(results, media, lang, manual, movie):
     if movie or max(map(int, media.seasons.keys()))<=1:  maxi, n =         AniDB.Search(results, media, lang, manual, movie)
     if maxi<50 and movie:                                maxi    =    TheMovieDb.Search(results, media, lang, manual, movie)
     if maxi<80 and not movie or n>1:                     maxi    = max(TheTVDB.Search(results, media, lang, manual, movie), maxi)
+    if maxi<80 and not movie:                            maxi    = max(TheMovieDb.SearchTV(results, media, lang, manual), maxi)
   Log.Info("".ljust(157, '='))
   Log.Info("end: {}".format(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")))
   Log.Close()
