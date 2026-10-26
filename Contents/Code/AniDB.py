@@ -138,9 +138,11 @@ def GetMetadata(media, movie, error_log, source, AniDBid, TVDBid, AniDBMovieSets
   else:                                               full_array, AniDB_array = [], {}
   
   active_array = full_array if Dict(mappingList, 'possible_anidb3') or source in ("tvdb4", "tvdb6") else AniDB_array.keys()  # anidb3(tvdb)/anidb4(tvdb6) for full relation_map data | tvdb4 bc the above will not be able to know the AniDBid
+  # Unmapped TVDB series can contain sentinel IDs; keep any valid mapped installments.
+  active_array = [anidbid for anidbid in active_array if isinstance(anidbid, basestring) and anidbid.isdigit() and int(anidbid) > 0]
   Log.Info("Source: {}, AniDBid: {}, Full AniDBids list: {}, Active AniDBids list: {}".format(source, AniDBid, full_array, active_array))
   for anidbid in sorted(AniDB_array, key=common.natural_sort_key):
-    Log.Info('[+] {:>5}: {}'.format(anidbid, AniDB_array[anidbid]))
+    Log.Info('[+] {:>5}: {}'.format(str(anidbid), AniDB_array[anidbid]))
   
   ### Build list_abs_eps for tvdb 3/4/5 ###
   list_abs_eps, list_sp_eps={}, []
@@ -220,7 +222,8 @@ def GetMetadata(media, movie, error_log, source, AniDBid, TVDBid, AniDBMovieSets
         for role in xml.xpath('characters/character[(@type="secondary cast in") or (@type="main character in")]'):
           try:
             if GetXml(role, 'seiyuu') and GetXml(role, 'name'):  
-              role_dict = {'role': role.find('name').text, 'name': role.find('seiyuu').text, 'photo': ANIDB_PIC_BASE_URL + role.find('seiyuu').get('picture')}
+              picture = role.find('seiyuu').get('picture')
+              role_dict = {'role': role.find('name').text, 'name': role.find('seiyuu').text, 'photo': ANIDB_PIC_BASE_URL + picture if picture else None}
               SaveDict([role_dict], AniDB_dict, 'roles')
               Log.Info('[ ] role: {:<20}, name: {:<20}, photo: {}'.format(role_dict['role'], role_dict['name'], role_dict['photo']))
           except Exception as e:  Log.Info("Seyiuu error: {}".format(e))

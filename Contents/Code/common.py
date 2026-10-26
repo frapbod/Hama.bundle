@@ -383,11 +383,12 @@ def LoadFile(filename="", relativeDirectory="", url="", headers={}, data=None, c
 
   # Load from disk if present
   file_object, file_age = LoadFileCache(filename, relativeDirectory)
+  force_refresh = getattr(tlocal, 'force_tvdb_refresh', False) and relativeDirectory.replace('\\', '/').split('/')[:2] in (['TheTVDB', 'json'], ['TheTVDBv4', 'json'], ['TheMovieDb', 'episodes'])
   if file_object is not None:  Log.Debug("common.LoadFile() - File cached locally - Filename: '{file}', Age: '{age:.2f} days', Limit: '{limit} days', url: '{url}'".format(url=url, file=os.path.join(relativeDirectory, filename), age=file_age/CACHE_1DAY, limit=cache/CACHE_1DAY))
 
   #File not cached OR cache older than passed cache age / adjusted AniDB age
   file_downloaded = None
-  if file_object is None or file_age > cache:
+  if force_refresh or file_object is None or file_age > cache:
     # Check to see if we are at throttle max and needs to be put on hold
     # Done before lock is aquired to alow other threads to move forward
     while throttle[0]:  # Only check if throttle index is defined
@@ -411,7 +412,7 @@ def LoadFile(filename="", relativeDirectory="", url="", headers={}, data=None, c
     
     # Download URL to memory, Plex cache to 1 day
     try:
-      file_downloaded = HTTP.Request(url, headers=headers, data=data, timeout=60, cacheTime=CACHE_1DAY).content   #'Accept-Encoding':'gzip'  # Loaded with Plex cache, str prevent AttributeError: 'HTTPRequest' object has no attribute 'find', None if 'thetvdb' in url else 
+      file_downloaded = HTTP.Request(url, headers=headers, data=data, timeout=60, cacheTime=0 if force_refresh else CACHE_1DAY).content
       if url.endswith(".gz"):  file_downloaded = decompress(file_downloaded)
     except Exception as e:
       Log.Error("common.LoadFile() - issue loading url: '{}', filename: '{}', Headers: {}, Exception: '{}'".format(url, filename, headers, e))        # issue loading, but not AniDB banned as it returns "<error>Banned</error>"
@@ -435,6 +436,7 @@ def LoadFile(filename="", relativeDirectory="", url="", headers={}, data=None, c
       elif file_downloaded.startswith("<error"):             Log.Error('common.LoadFile() - Error response received, file: "{}"'.format(file_downloaded));  return file_downloaded_object
       else:                                                  SaveFile(filename, file_downloaded, relativeDirectory);  return file_downloaded_object
   
+  if force_refresh and file_object is not None:  Log.Error('Forced episode/provider refresh failed; retaining cached metadata for {}'.format(filename))
   return file_object
   
 ### Download images and themes for Plex ###############################################################################################################################
@@ -641,7 +643,7 @@ def UpdateMeta(metadata, media, movie, MetaSources, mappingList):
         for episode in sorted(MetaSources[source]['seasons'][season]['episodes'], key=natural_sort_key) if 'episodes' in MetaSources[source]['seasons'][season] else []:
           for field in MetaSources[source]['seasons'][season]['episodes'][episode]:
             if field in FieldListEpisodes:      episode_fields[field] = episode_fields[field] + 1 if field in episode_fields else 1
-            elif field is not 'language_rank':  Log.Info("                     {:<23} Season {:>3}, Episode: {:>3} is not a valid metadata field, value: '{!s}'".format(field, season, episode, MetaSources[source]['seasons'][season]['episodes'][episode][field])); ep_invalid+=1
+            elif field not in ('language_rank', 'tvdb_id'):  Log.Info("                     {:<23} Season {:>3}, Episode: {:>3} is not a valid metadata field, value: '{!s}'".format(field, season, episode, MetaSources[source]['seasons'][season]['episodes'][episode][field])); ep_invalid+=1
           ep_nb+=1
       if len(season_fields ):  Log.Info("  - Seasons   ({nb:>3}): {fields}".format(nb=len(MetaSources[source]['seasons']), fields=' | '.join('{}{:<23} ({:>3})'.format('\n                     ' if i%5==0 and i>0 else '',field,  season_fields[field]) for i, field in  enumerate(season_fields))))
       if len(episode_fields):  Log.Info("  - Episodes  ({nb:>3}): {fields}".format(nb=ep_nb-ep_invalid                   , fields=' | '.join('{}{:<23} ({:>3})'.format('\n                     ' if i%5==0 and i>0 else '',field, episode_fields[field]) for i, field in enumerate(episode_fields))))
@@ -665,7 +667,7 @@ def UpdateMeta(metadata, media, movie, MetaSources, mappingList):
   
   for field in FieldListMovies if movie else FieldListSeries:
     meta_old    = getattr(metadata, field)
-    if field in ('posters', 'banners', 'art'):  meta_old.validate_keys([])  #This will allow the images to get readded at the correct priority level if preferences are updates and meta is refreshed
+    # Keep existing artwork until usable replacements have been downloaded.
     source_list = [ source_ for source_ in MetaSources if Dict(MetaSources, source_, field) ]
     language_rank, language_source = len(languages)+1, None
     for source in [source.strip() for source in (Prefs[field].split('|')[0] if '|' in Prefs[field] else Prefs[field]).split(',') if Prefs[field]]:
@@ -702,18 +704,15 @@ def UpdateMeta(metadata, media, movie, MetaSources, mappingList):
     cached_logs    = {}
     #@parallelize
     #def addMeta():
-    season_posters_list = []
     for season in sorted(media.seasons, key=natural_sort_key):  # For each season, media, then use metadata['season'][season]...
       Log.Info(("metadata.seasons[{:>2}]".format(season)).ljust(157, '-'))
       new_season  = season
       for field in FieldListSeasons:  #metadata.seasons[season].attrs.keys()
         source_list = [ source_ for source_ in MetaSources if Dict(MetaSources, source_, 'seasons', season, field) ]
         meta_old = getattr(metadata.seasons[season], field)
-        if field in ('posters', 'banners', 'art'):  meta_old.validate_keys([])  #This will allow the images to get readded at the correct priority level if preferences are updates and meta is refreshed
-        for source in [source.strip() for source in Prefs[field].split(',') if Prefs[field]]:
+        for source in [source.strip() for source in Prefs[field].split('|')[0].split(',') if Prefs[field]]:
           if source in MetaSources:
             if Dict(MetaSources, source, 'seasons', season, field) or metadata.id.startswith('tvdb4'):
-              if field=='posters':  season_posters_list.extend(Dict(MetaSources, source, 'seasons', season, 'posters', default={}).keys())
               UpdateMetaField(metadata, metadata.seasons[season], Dict(MetaSources, source, 'seasons', season), FieldListSeasons, field, source, movie, source_list)
               if field in count:  count[field] = count[field] + 1
               if field not in ['posters', 'art']:  break 
@@ -750,10 +749,8 @@ def UpdateMeta(metadata, media, movie, MetaSources, mappingList):
           else:
             if field=='title' and source_title:                                    UpdateMetaField(metadata, (metadata, season, episode, new_season, new_episode), Dict(MetaSources, source_title, 'seasons', new_season, 'episodes', new_episode), FieldListEpisodes, field, source_title, movie, source_list)
             elif not Dict(count, field) and field!='seasons' and Prefs[field]!="None" and source_list:  Log.Info("[#] {field:<29}  Sources: {sources:<60}  Inside: {source_list}".format(field=field, sources='' if field=='seasons' else Prefs[field], source_list=source_list))
-        if field=='thumbs':    metadata.seasons[season].episodes[episode].thumbs.validate_keys(meta_new.keys())
         # End Of for field
       # End Of for episode
-    else:  metadata.seasons[season].posters.validate_keys(season_posters_list)
     # End of for season
     Log.Info("".ljust(157, '-'))
   global downloaded; downloaded = {'posters':0, 'art':0, 'seasons':0, 'banners':0, 'themes':0, 'thumbs': 0} 
