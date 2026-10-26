@@ -153,11 +153,13 @@ class AgentRoutingTests(unittest.TestCase):
         self.anidb_search = Mock(return_value=(0, 0))
         self.tvdb_search = Mock(return_value=100)
         self.ns.update(common=self.common, datetime=datetime,
-                       TheMovieDb=types.SimpleNamespace(ResolveTVDBID=self.resolver),
+                       TheMovieDb=types.SimpleNamespace(ResolveTVDBID=self.resolver, TVSearchCandidates=Mock(return_value=[])),
+                       TheTVDBv2=types.SimpleNamespace(SearchResults=type('Results', (list,), {'Append': list.append})),
+                       AnimeLists=types.SimpleNamespace(AniDBTVDBMap=None),
                        AniDB=types.SimpleNamespace(Search=self.anidb_search),
                        TheTVDB=types.SimpleNamespace(Search=self.tvdb_search),
                        MetadataSearchResult=lambda **kwargs: kwargs)
-        load_functions('__init__.py', ['Search', 'Update'], self.ns)
+        load_functions('__init__.py', ['Search', 'ReconcileTVSearch', 'Update'], self.ns)
         self.media = types.SimpleNamespace(show='', name='', filename='', year=2024,
                                            seasons={'2': types.SimpleNamespace(episodes={})})
         # Search imports common.Log inside the function, just as Plex does.

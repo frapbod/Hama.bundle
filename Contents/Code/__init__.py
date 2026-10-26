@@ -85,6 +85,41 @@ def Start():
   AnimeLists.GetAniDBMovieSets()
   AniDB.GetAniDBTitlesDB()
   
+def ReconcileTVSearch(results, previous, media, lang, manual):
+  '''Resolve title/year evidence before publishing any untagged TV candidate.'''
+  verified = TheMovieDb.TVSearchCandidates(media, lang)
+  has_year = bool(media.year) or re.search(r'\s+\(([0-9]{4})\)$', media.show.strip()) is not None
+  if verified is None:  return  # Failed/incomplete identity evidence, not an anime win.
+  if not verified:
+    # Preserve anime-only coverage when no premiere year was requested.
+    if not has_year:
+      for candidate in previous:  results.Append(candidate)
+    return
+  anime_ids = {}
+  for anime in AnimeLists.AniDBTVDBMap.iter('anime') if AnimeLists.AniDBTVDBMap is not None else []:
+    aid, tid = anime.get('anidbid'), anime.get('tvdbid') or ''
+    if tid.isdigit():
+      if aid not in anime_ids:  anime_ids[aid] = []
+      if tid not in anime_ids[aid]:  anime_ids[aid].append(tid)
+  same, conflict = [], False
+  for candidate in previous:
+    if candidate.score<80:  continue
+    source, identifier = candidate.id.split('-', 1)
+    ids = [identifier] if source.startswith('tvdb') else anime_ids.get(identifier, []) if source.startswith('anidb') else []
+    if len(verified)==1 and ids == [verified[0].id.split('-', 1)[1]]:
+      same.append(candidate)
+    else:  conflict = True
+  ambiguous = len(verified)>1 or conflict and not has_year
+  if ambiguous:
+    if manual:
+      for candidate in verified:
+        candidate.score = 79
+        results.Append(candidate)
+    return
+  # A verified same-series mapping retains the original AniDB numbering.
+  # With a requested year, discard other identities even if their name scored 100.
+  for candidate in same or verified:  results.Append(candidate)
+
 ### Movie/Serie search ###################################################################################################################################################
 def Search(results, media, lang, manual, movie):
   from common import Log  #Import here for startup logging to go to the plex pms log
@@ -121,9 +156,11 @@ def Search(results, media, lang, manual, movie):
   else:  #if media.year is not None:  orig_title = orig_title + " (" + str(media.year) + ")"  ### Year - if present (manual search or from scanner but not mine), include in title ###
     Log.Info('--- source searches ---'.ljust(157, '-'))
     maxi, n = 0, 0
-    if movie or max(map(int, media.seasons.keys()))<=1:  maxi, n =         AniDB.Search(results, media, lang, manual, movie)
-    if maxi<50 and movie:                                maxi    =    TheMovieDb.Search(results, media, lang, manual, movie)
-    if maxi<80 and not movie or n>1:                     maxi    = max(TheTVDB.Search(results, media, lang, manual, movie), maxi)
+    candidates = results if movie else TheTVDBv2.SearchResults()
+    if movie or max(map(int, media.seasons.keys()))<=1:  maxi, n =         AniDB.Search(candidates, media, lang, manual, movie)
+    if maxi<50 and movie:                                maxi    =    TheMovieDb.Search(candidates, media, lang, manual, movie)
+    if maxi<80 and not movie or n>1:                     maxi    = max(TheTVDB.Search(candidates, media, lang, manual, movie), maxi)
+    if not movie:  ReconcileTVSearch(results, candidates, media, lang, manual)
   Log.Info("".ljust(157, '='))
   Log.Info("end: {}".format(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")))
   Log.Close()
