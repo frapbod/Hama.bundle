@@ -26,24 +26,31 @@ commit `b6bfa300332369062b48d17e2277207d1da0a6cd`.
   and TMDb IDs before accepting a positive TVDB ID. Missing or ambiguous
   identities produce no match rather than a fuzzy title fallback. Existing
   explicit AniDB and TVDB numbering modes are preserved.
-- Restore untagged general-TV searches through TMDb's supported TV search API
-  when the existing anime/TVDB routes produce no score of 80 or higher. Tagged
-  IDs, movie searches, high-confidence anime matches and numbering keep their
-  existing paths. This does not change field-source preferences or update code.
-  Search compares normalized localized/original titles, preserves non-Latin
-  characters, and uses a supplied premiere year or trailing `(YYYY)` to separate
-  remakes. Conflicting years, fuzzy-only matches, failed identity checks and
-  incomplete (multi-page) result sets produce no new candidate. Add the premiere
-  year or an exact provider tag for such queries. No show-specific exceptions
-  are used.
-  A unique exact title/year candidate must pass the TMDb external-ID lookup and
-  a unique reverse TVDB-ID lookup with the same TMDb ID, title and premiere date.
-  Ambiguous automatic searches return no new candidate; manual choices remain
-  below automatic-match confidence (79), even if one candidate lacks an external
-  ID. A complete page is capped at 20 entries: at most 3 provider reads for an
-  automatic search and 41 for manual choices. Search results use a one-day cache;
-  identity reads reuse the existing cache. New uncached reads use the existing
-  serialized loader with 100 ms spacing; no retries or new credentials are added.
+- Restore untagged general-TV searches through TMDb's supported TV search API.
+  The shared dispatcher collects legacy anime candidates before publishing any
+  result. An anime similarity score, even 100, is not title/year identity proof:
+  AniDB ignores the requested premiere year and echoes it in its result.
+  Every untagged TV query now checks exact normalized localized/original titles
+  and a supplied premiere year or trailing `(YYYY)`, including high-scoring anime
+  collisions. A unique candidate must pass the TMDb external-ID lookup and a
+  unique reverse TVDB-ID lookup with the same TMDb ID, title and premiere date.
+  A verified same-series Anime-Lists mapping keeps the original anime numbering;
+  with a requested year, conflicting/unverified legacy identities are discarded.
+  Without a year, multiple exact identities or a conflicting strong anime
+  candidate are ambiguous: automatic searches return nothing and manual choices
+  remain at 79. Failed/incomplete provider or external-ID evidence returns no
+  result, not the old anime guess. A complete search with no exact title retains
+  the existing anime-only path only when no premiere year was requested.
+  Tagged IDs and movie searches bypass this reconciliation entirely. Field-source
+  preferences, metadata updates and numbering maps are unchanged. No title-specific
+  rules or confidence-threshold bumps are used. Add a premiere year or explicit
+  provider tag when evidence is ambiguous or unavailable.
+  A complete page is capped at 20 entries: up to 41 provider reads per search
+  (normally 3 for one exact candidate). This also applies to automatic ambiguity
+  checks. Search results use a one-day cache; identity reads reuse the existing
+  cache. New uncached reads use the existing serialized loader with 100 ms spacing;
+  no retries or new credentials are added. Untagged anime search now depends on
+  this provider being available; tagged anime and metadata updates do not.
 - Add artwork without deleting existing URLs first. Provider failures and
   partial image-download failures cannot clear the old show/season artwork.
   Existing artwork keeps its previous ordering; future preference changes
@@ -136,6 +143,12 @@ python3 scripts/verify_tv_search.py --cases /path/to/cases.json --output /path/t
 This probe executes production functions against live TMDb, with no Plex writes.
 It is not a deployed-agent canary. The RestrictedPython runner also executes the
 shared title-search cases and real agent dispatch for tagged IDs/anime priority.
+Integrated cases cover live-action/anime name collisions through the actual Search
+function, both explicit/trailing years, single/multi-season numbering, automatic
+and manual ambiguity, provider failure, partial pages, mapping conflicts and
+missing results. These run with the same source fixtures under Python 3 and the
+installed Plex Python 2 RestrictedPython environment; a provider-only pass does
+not establish dispatcher correctness.
 
 Build from a clean committed checkout:
 

@@ -13,12 +13,16 @@ import urllib.parse
 import urllib.request
 
 
+class Result(dict):
+    __getattr__ = dict.__getitem__
+
+
 def search_namespace():
     code = Path(__file__).resolve().parents[1] / 'Contents/Code'
     ns = dict(os=os, re=re, unicodedata=unicodedata, unicode=str, CACHE_1DAY=86400,
               String=types.SimpleNamespace(Quote=urllib.parse.quote),
               Hash=types.SimpleNamespace(SHA1=lambda s: hashlib.sha1(s.encode()).hexdigest()),
-              MetadataSearchResult=lambda **kw: kw)
+              MetadataSearchResult=Result)
     helpers = ast.parse((code / 'common.py').read_text())
     exec(compile(ast.Module(body=[n for n in helpers.body if isinstance(n, ast.FunctionDef) and n.name == 'Dict'], type_ignores=[]), '<common>', 'exec'), ns)
     def read(**kwargs):
@@ -30,7 +34,7 @@ def search_namespace():
             raise RuntimeError('provider request failed') from None
     ns['common'] = types.SimpleNamespace(LoadFile=read)
     tree = ast.parse((code / 'TheMovieDb.py').read_text())
-    nodes = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in ('SearchTV', 'TVTitleKey') or isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id.startswith('TMDB_') for t in n.targets)]
+    nodes = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in ('SearchTV', 'TVSearchCandidates', 'TVTitleKey') or isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id.startswith('TMDB_') for t in n.targets)]
     exec(compile(ast.Module(body=nodes, type_ignores=[]), '<TheMovieDb>', 'exec'), ns)
     return ns
 

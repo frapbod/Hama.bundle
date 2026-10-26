@@ -128,7 +128,9 @@ def mapped_search(*args):
     routes.append('mapped')
     return 100
 routing.update(AniDB=Namespace(Search=anime_search), TheTVDB=Namespace(Search=mapped_search),
-               TheMovieDb=Namespace(ResolveTVDBID=env['ResolveTVDBID'], SearchTV=env['SearchTV']))
+               TheMovieDb=Namespace(ResolveTVDBID=env['ResolveTVDBID'], TVSearchCandidates=lambda *a: []),
+               TheTVDBv2=Namespace(SearchResults=type('Results', (list,), {'Append': list.append})),
+               AnimeLists=Namespace(AniDBTVDBMap=None))
 exec(RestrictedPython.compile_restricted(payload['agentSearch'].encode('utf-8'), '<agent-search>', 'exec', elevated=True), routing)
 def agent_search(title, seasons):
     result = []
@@ -151,10 +153,13 @@ routing['TheTVDB'].Search = lambda *args: 0
 # The search tests above already execute every new provider boundary.
 def general_search(*args):
     routes.append('general')
-    return 100
-routing['TheMovieDb'].SearchTV = general_search
+    return []
+routing['TheMovieDb'].TVSearchCandidates = general_search
 agent_search('The Pitt', {'2': None})
 record('agent_general_tv_fallback', routes == ['general'])
+dispatch_env = {}
+exec(compile(payload['dispatchCases'].encode('utf-8'), '<tv-dispatch-cases>', 'exec'), dispatch_env)
+tests.extend(dispatch_env['run_dispatch_cases'](env, routing, common))
 print(json.dumps({'python': sys.version, 'installedPaths': paths,
                   'installedSha256': dict((name, hashlib.sha256(value).hexdigest()) for name, value in installed.items()),
                   'environmentNames': sorted(available_globals), 'unsupportedAddedBuiltins': unsupported,
@@ -184,15 +189,16 @@ def main():
                        'TheTVDBv4.py', '__init__.py', 'common.py')
     added = {name: (root / 'Contents/Code' / name).read_text() for name in changed_modules}
     payload = {'libraries': args.libraries, 'source': source, 'commonHelpers': helpers, 'addedCode': added,
-               'agentSearch': selected_functions((root / 'Contents/Code/__init__.py').read_text(), ('Search',)),
-               'tvCases': (root / 'tests/tv_search_cases.py').read_text()}
+               'agentSearch': selected_functions((root / 'Contents/Code/__init__.py').read_text(), ('ReconcileTVSearch', 'Search')),
+               'tvCases': (root / 'tests/tv_search_cases.py').read_text(),
+               'dispatchCases': (root / 'tests/tv_dispatch_cases.py').read_text()}
     result = subprocess.run(runner + ['-c', RUNNER], input=json.dumps(payload), text=True, capture_output=True)
     reports = [line for line in result.stdout.splitlines() if line.startswith('{')]
     okay = False
     if reports:
         report = json.loads(reports[-1])
         report['sourceSha256'] = hashlib.sha256(source.encode()).hexdigest()
-        okay = (len(report.get('tests', [])) >= 56 and all(t['passed'] for t in report['tests'])
+        okay = (len(report.get('tests', [])) >= 132 and all(t['passed'] for t in report['tests'])
                 and report['negativeControls'] == {'any': True, 'all': True}
                 and not report['unsupportedAddedBuiltins'])
         if args.output:

@@ -29,49 +29,60 @@ def TVTitleKey(title):
   title = unicodedata.normalize('NFKC', unicode(title or '')).lower()
   return re.sub(r'[\W_]+', ' ', title.replace(u'\u2019', '').replace("'", ''), flags=re.UNICODE).strip()
 
-def SearchTV(results, media, lang, manual):
-  '''Conservative general-TV fallback; never auto-select ambiguous/fuzzy titles.'''
+def TVSearchCandidates(media, lang):
+  '''Return cross-checked exact-title candidates; None means incomplete evidence.
+
+  An empty list means a complete search found no exact title. Keep this distinct
+  from provider failure/ambiguity so the caller cannot promote an anime guess.
+  '''
   title, year = media.show.strip(), str(media.year or '')
   suffix = re.search(r'\s+\(([0-9]{4})\)$', title)
   if suffix:
-    if year and year != suffix.group(1):  return 0
+    if year and year != suffix.group(1):  return None
     title, year = title[:suffix.start()].strip(), suffix.group(1)
-  if not title or year and not re.match(r'^[1-9][0-9]{3}$', year):  return 0
+  if not title or year and not re.match(r'^[1-9][0-9]{3}$', year):  return None
   lang = lang if re.match(r'^[a-z]{2,3}(?:-[A-Z]{2})?$', lang or '') else 'en'
   url = 'https://api.themoviedb.org/3/search/tv?api_key={}&query={}&language={}&include_adult=false&page=1'.format(TMDB_API_KEY, String.Quote(title), lang)
   if year:  url += '&first_air_date_year=' + year
   response = common.LoadFile(filename='TV-search-' + Hash.SHA1(url) + '.json', relativeDirectory=os.path.join('TheMovieDb', 'search'), url=url, cache=CACHE_1DAY, sleep=0.1)
+  if not isinstance(response, dict) or 'results' not in response:  return None
   rows = Dict(response, 'results', default=[])
   # One complete page bounds provider work. A partial set cannot prove uniqueness.
-  if not isinstance(rows, list) or len(rows)>20 or Dict(response, 'total_pages') != 1:  return 0
+  if not isinstance(rows, list) or len(rows)>20 or Dict(response, 'total_pages') not in (0, 1):  return None
+  if Dict(response, 'total_pages') == 0 and rows:  return None
   candidates = {}
   key = TVTitleKey(title)
-  if not key:  return 0
+  if not key:  return None
   for row in rows:
     tmdb_id = str(Dict(row, 'id'))
     if not tmdb_id.isdigit() or int(tmdb_id)<=0:  continue
     if key not in (TVTitleKey(Dict(row, 'name')), TVTitleKey(Dict(row, 'original_name'))):  continue
     if year and str(Dict(row, 'first_air_date'))[:4] != year:  continue
     candidates[tmdb_id] = row
-  if not candidates or len(candidates)>1 and not manual:  return 0
   score = 100 if len(candidates)==1 else 79
-  maxi = 0
+  verified = []
   for tmdb_id in sorted(candidates):
     row = candidates[tmdb_id]
     external = common.LoadFile(filename='TV-external-' + tmdb_id + '.json', relativeDirectory=os.path.join('TheMovieDb', 'identity'), url=TMDB_TV_EXTERNAL_IDS_URL.format(id=tmdb_id), sleep=0.1)
     tvdb_id = str(Dict(external, 'tvdb_id'))
-    if str(Dict(external, 'id')) != tmdb_id or not tvdb_id.isdigit() or int(tvdb_id)<=0:  continue
+    if str(Dict(external, 'id')) != tmdb_id or not tvdb_id.isdigit() or int(tvdb_id)<=0:  return None
     reverse = common.LoadFile(filename='TVDB-find-' + tvdb_id + '-' + lang + '.json', relativeDirectory=os.path.join('TheMovieDb', 'identity'), url=TMDB_FIND_TVDB_EPISODE_URL.format(id=tvdb_id, lang=lang), sleep=0.1)
     matches = Dict(reverse, 'tv_results', default=[])
-    if not isinstance(matches, list) or len(matches)!=1 or str(Dict(matches[0], 'id')) != tmdb_id:  continue
+    if not isinstance(matches, list) or len(matches)!=1 or str(Dict(matches[0], 'id')) != tmdb_id:  return None
     # Check the reverse lookup still describes the selected title and premiere.
-    if key not in (TVTitleKey(Dict(matches[0], 'name')), TVTitleKey(Dict(matches[0], 'original_name'))):  continue
-    if Dict(matches[0], 'first_air_date') != Dict(row, 'first_air_date'):  continue
+    if key not in (TVTitleKey(Dict(matches[0], 'name')), TVTitleKey(Dict(matches[0], 'original_name'))):  return None
+    if Dict(matches[0], 'first_air_date') != Dict(row, 'first_air_date'):  return None
     date = str(Dict(row, 'first_air_date'))
     result_year = int(date[:4]) if re.match(r'^[1-9][0-9]{3}-', date) else None
-    results.Append(MetadataSearchResult(id='tvdb-' + tvdb_id, name=u'{} [tvdb-{}]'.format(Dict(row, 'name') or title, tvdb_id), year=result_year, lang=lang, score=score))
-    maxi = score
-  return maxi
+    verified.append(MetadataSearchResult(id='tvdb-' + tvdb_id, name=u'{} [tvdb-{}]'.format(Dict(row, 'name') or title, tvdb_id), year=result_year, lang=lang, score=score))
+  return verified
+
+def SearchTV(results, media, lang, manual):
+  '''Expose the same verified candidates to standalone provider callers.'''
+  candidates = TVSearchCandidates(media, lang)
+  if not candidates or len(candidates)>1 and not manual:  return 0
+  for candidate in candidates:  results.Append(candidate)
+  return candidates[0].score
 
 def ResolveTVDBID(imdb_id):
   '''Resolve a forced TV IMDb ID without fuzzy title matching or movie fallback.'''

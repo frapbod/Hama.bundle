@@ -8,6 +8,11 @@ except ImportError:
     from urllib import quote
 
 
+class Result(dict):
+    __getattr__ = dict.__getitem__
+    __setattr__ = dict.__setitem__
+
+
 class Namespace(object):
     def __init__(self, **values):
         self.__dict__.update(values)
@@ -25,11 +30,15 @@ def run_cases(env):
         calls[:] = []
     def load(**kwargs):
         calls.append(kwargs)
+        if '/tv/101/' in kwargs['url']:
+            return {'id': 101, 'tvdb_id': 411365}
+        if '/find/411365?' in kwargs['url']:
+            return {'tv_results': [dict(row, id=101, first_air_date='2020-01-01')]}
         return copy.deepcopy(fixture['search'] if '/search/' in kwargs['url'] else fixture['reverse'] if '/find/' in kwargs['url'] else fixture['external'])
     env['common'].LoadFile = load
     env.update(String=Namespace(Quote=lambda x: quote(x.encode('utf-8'))),
                Hash=Namespace(SHA1=lambda x: hashlib.sha1(x.encode('utf-8')).hexdigest()),
-               CACHE_1DAY=86400, MetadataSearchResult=lambda **kw: kw,
+               CACHE_1DAY=86400, MetadataSearchResult=Result,
                TMDB_API_KEY='fixture', TMDB_TV_EXTERNAL_IDS_URL='https://fixture.invalid/tv/{id}/external_ids',
                TMDB_FIND_TVDB_EPISODE_URL='https://fixture.invalid/find/{id}?language={lang}')
     def search(title='The Pitt', year=None, manual=False, lang='en'):
@@ -64,7 +73,7 @@ def run_cases(env):
         record('tv_unicode_result_' + title, search(title)[1][0]['name'].startswith(title))
     other = dict(row, id=101, first_air_date='2020-01-01')
     reset([row, other])
-    record('tv_ambiguous_automatic_rejected', search() == (0, []) and len(calls) == 1)
+    record('tv_ambiguous_automatic_rejected', search() == (0, []) and len(calls) == 5)
     reset([row, other])
     record('tv_ambiguous_manual_never_auto_score', search(manual=True)[0] == 79)
     reset([row, other])
